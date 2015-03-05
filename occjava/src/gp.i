@@ -294,12 +294,12 @@ class gp_Trsf
 	gp_Trsf();
 	void SetRotation(const gp_Ax1& A1,const Standard_Real Ang) ;
 	void SetTranslation(const gp_Vec& V) ;
+	
 	void SetValues(const Standard_Real a11,const Standard_Real a12,
 		const Standard_Real a13,const Standard_Real a14,const Standard_Real a21,
 		const Standard_Real a22,const Standard_Real a23,const Standard_Real a24,
 		const Standard_Real a31,const Standard_Real a32,const Standard_Real a33,
-		const Standard_Real a34,const Standard_Real Tolang,
-		const Standard_Real TolDist);
+		const Standard_Real a34);
 };
 
 %extend gp_Trsf

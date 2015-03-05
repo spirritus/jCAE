@@ -24,6 +24,6 @@ class BRepFill_Pipe  {
   TopoDS_Face Face(const TopoDS_Edge& ESpine,const TopoDS_Edge& EProfile) ;
   TopoDS_Edge Edge(const TopoDS_Edge& ESpine,const TopoDS_Vertex& VProfile) ;
   TopoDS_Shape Section(const TopoDS_Vertex& VSpine) const;
-  TopoDS_Wire PipeLine(const gp_Pnt& Point) const;
+  TopoDS_Wire PipeLine(const gp_Pnt& Point);
 };
 
