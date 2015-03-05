@@ -28,20 +28,16 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_NurbsConvert.hxx>
-#include <Standard_Version.hxx>
-#if OCC_VERSION_MAJOR >= 6
 #include <BRepBuilderAPI_Sewing.hxx>
-#else
-#include <BRepAlgo_Sewing.hxx>
-#define BRepBuilderAPI_Sewing BRepAlgo_Sewing
-#endif
 %}
 
 class BRepBuilderAPI_Command
 {
 	%rename(isDone) IsDone;
+	%rename(check) Check;
 	BRepBuilderAPI_Command()=0;
 	public:
+	void Check() const;
 	virtual Standard_Boolean  IsDone() const;
 };
 
@@ -123,17 +119,15 @@ class BRepBuilderAPI_MakeEdge : public BRepBuilderAPI_MakeShape
 	BRepBuilderAPI_MakeEdge(const gp_Parab& L,const gp_Pnt& P1,const gp_Pnt& P2);
 	BRepBuilderAPI_MakeEdge(const gp_Parab& L,const TopoDS_Vertex& V1,const TopoDS_Vertex& V2);
 	Standard_Boolean IsDone() const;
-	//const TopoDS_Edge& Edge() const;
 };
 
 class BRepBuilderAPI_MakeFace  : public BRepBuilderAPI_MakeShape
 {
 	%rename(face) Face;
 	public:
-	BRepBuilderAPI_MakeFace(const TopoDS_Wire& W,
-		const Standard_Boolean OnlyPlane = Standard_False);
+	BRepBuilderAPI_MakeFace(const TopoDS_Wire& W, const Standard_Boolean OnlyPlane = Standard_False);
     BRepBuilderAPI_MakeFace(const TopoDS_Face& F,const TopoDS_Wire& W);
-	//const TopoDS_Face& Face() const;
+	BRepBuilderAPI_MakeFace(const Handle_Geom_Surface& S,const Standard_Real TolDegen);
 };
 
 class BRepBuilderAPI_MakeSolid: public BRepBuilderAPI_MakeShape

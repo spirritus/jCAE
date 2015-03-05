@@ -41,14 +41,14 @@
 %apply double[] {double &};
 
 // load the native library
-%pragma(java) jniclasscode=%{
+/*%pragma(java) jniclasscode=%{
 	static
 	{
 		System.loadLibrary("OccJava");
 		if(!"0".equals(System.getenv("MMGT_OPT")))
 			throw new RuntimeException("The MMGT_OPT environement variable must be set to 0 before using occjava.");
 	}
-%}
+%}*/
 
 %include "Standard.i"
 %include "gp.i"
@@ -56,16 +56,22 @@
 %include "TopAbs.i"
 %include "TopoDS.i"
 %include "GeomAbs.i"
+%include "GeomFill_Trihedron.i"
+%include "BRepBuilderAPI_TransitionMode.i"
+%include "BRepBuilderAPI_PipeError.i"
 %include "TopTools.i"
 %include "BRep.i"
+%include "BRepFill.i"
+%include "BRepFill_TypeOfContact.i"
 %include "GeomLProp_SLProps.i"
 %include "BRepTools.i"
 %include "BRepBuilderAPI.i"
-%include "BRepOffsetAPI.i"
 %include "BRepPrimAPI.i"
 %include "BRepAlgoAPI.i"
+%include "BRepOffsetAPI.i"
 %include "Poly.i"
 %include "Geom.i"
+%include "GeomFill.i"
 %include "BRepLib.i"
 %include "BRepFilletAPI.i"
 %include "BRepCheck.i"
@@ -75,9 +81,10 @@
 %include "APIHeaderSection_MakeHeader.i"
 // This one require Opencascade 6.2
 %include "ShapeUpgrade.i"
-//Jens Schmidt, req. f. Thesis
 %include "GeomAPI.i"
 %include "GC.i"
+%include "Approx_Param.i"
+%include "BRepAlgo.i"
 
 
 %typemap(javacode) TopExp
@@ -250,6 +257,50 @@ class GeomAdaptor_Curve: public Adaptor3d_Curve
 
 };
 
+/**
+ * BRepAdaptor_Curve
+ */
+%{#include "BRepAdaptor_Curve.hxx"%}
+
+class BRepAdaptor_Curve  : public Adaptor3d_Curve 
+{
+	%rename(initialize) Initialize;
+	%rename(trsf) Trsf;
+	%rename(is3DCurve) Is3DCurve;
+	%rename(isCurveOnSurface) IsCurveOnSurface;
+	%rename(curve) Curve;
+	%rename(curveOnSurface) CurveOnSurface;
+	%rename(edge) Edge;
+	%rename(tolerance) Tolerance;
+	%rename(firstParameter) FirstParameter;
+	%rename(lastParameter) LastParameter;
+	%rename(isClosed) IsClosed;
+	%rename(isPeriodic) IsPeriodic;
+	%rename(period) Period;
+	%rename(value) Value;
+	%rename(getType) GetType;
+	public:
+	BRepAdaptor_Curve();
+	BRepAdaptor_Curve(const TopoDS_Edge& E);
+	BRepAdaptor_Curve(const TopoDS_Edge& E,const TopoDS_Face& F);
+	void Initialize(const TopoDS_Edge& E) ;
+	void Initialize(const TopoDS_Edge& E,const TopoDS_Face& F) ;
+	const gp_Trsf& Trsf() const;
+	Standard_Boolean Is3DCurve() const;
+	Standard_Boolean IsCurveOnSurface() const;
+	const GeomAdaptor_Curve& Curve() const;
+	const Adaptor3d_CurveOnSurface& CurveOnSurface() const;
+	const TopoDS_Edge& Edge() const;
+	Standard_Real Tolerance() const;
+	Standard_Real FirstParameter() const;
+	Standard_Real LastParameter() const;
+	Standard_Boolean IsClosed() const;
+	Standard_Boolean IsPeriodic() const;
+	Standard_Real Period() const;
+	gp_Pnt Value(const Standard_Real U) const;
+	GeomAbs_CurveType GetType() const;
+};
+
 
 /**
  * GProp_GProps
@@ -324,6 +375,24 @@ class GCPnts_UniformDeflection
 	Standard_Real Parameter(const Standard_Integer Index) const;
 };
 
+%{#include <GCPnts_AbscissaPoint.hxx>%}
+class GCPnts_AbscissaPoint
+{
+	%rename(length) Length;
+	%rename(isDone) IsDone;
+	%rename(parameter) Parameter;
+	public:
+    static  Standard_Real Length(Adaptor3d_Curve& C) ;
+    static  Standard_Real Length(Adaptor3d_Curve& C,const Standard_Real Tol) ;
+	static  Standard_Real Length(Adaptor3d_Curve& C,const Standard_Real U1,const Standard_Real U2) ;
+	static  Standard_Real Length(Adaptor3d_Curve& C,const Standard_Real U1,const Standard_Real U2,const Standard_Real Tol) ;
+	GCPnts_AbscissaPoint();
+	GCPnts_AbscissaPoint(Adaptor3d_Curve& C,const Standard_Real Abscissa,const Standard_Real U0);
+	GCPnts_AbscissaPoint(const Standard_Real Tol,Adaptor3d_Curve& C,const Standard_Real Abscissa,const Standard_Real U0);
+	Standard_Boolean IsDone() const;
+	Standard_Real Parameter() const;
+};
+
 %{#include <BRepMesh_DiscretRoot.hxx>%}
 class BRepMesh_DiscretRoot
 {
@@ -392,17 +461,4 @@ class GeomAPI_ProjectPointOnSurf
 	void LowerDistanceParameters(Quantity_Parameter& U,Quantity_Parameter& V) const;
 	void Parameters(const Standard_Integer Index,Quantity_Parameter& U,Quantity_Parameter& V) const;
 	gp_Pnt NearestPoint() const;
-};
-
-/**
- * BRepAlgo
- */
-%{#include <BRepAlgo.hxx>%}
-class BRepAlgo
-{
-	%rename(isValid) IsValid;
-	%rename(isTopologicallyValid) IsTopologicallyValid;
-	public:	
-	static Standard_Boolean IsValid(const TopoDS_Shape& S);
-	static Standard_Boolean IsTopologicallyValid(const TopoDS_Shape& S);
 };

@@ -20,8 +20,9 @@
 
 //Refine the catch keywoard
 %{#include <Standard_ErrorHandler.hxx>%}
-
-/*%exception
+/*%{#include <Standard_Failure.hxx>%}*/
+/*
+%exception
 {
 	try
 	{
@@ -29,10 +30,41 @@
 	}
 	catch(Standard_Failure) 
 	{
-		SWIG_JavaThrowException(jenv, SWIG_JavaRuntimeException, Standard_Failure::Caught()->DynamicType()->Name());
+		/*SWIG_JavaThrowException(jenv, SWIG_JavaRuntimeException, Standard_Failure::Caught()->DynamicType()->Name());
+		return $null;*/
+		/*jclass clazz = jenv->FindClass("java/lang/Exception");
+		jenv->ThrowNew(clazz, "EXCEPTION FROM CPP");
 		return $null;
 	}
 }*/
+
+/*
+class Standard_ErrorHandler  {
+    public:
+    Standard_ErrorHandler();
+};
+
+class Standard_Failure : public Standard_Transient {
+	public:
+	Standard_Failure();
+	Standard_CString GetMessageString() const;
+};
+
+%define WRAP_THROW_EXCEPTION( MATCH, CPPTYPE, JTYPE, JNITYPE )
+%javaexception(JTYPE) MATCH {
+  try {
+    $action
+  }
+  catch ( CPPTYPE & e ) {
+    jclass eclass = jenv->FindClass(JNITYPE);
+    if ( eclass ) {
+      jenv->ThrowNew( eclass, e.what() );
+    }
+  }
+}
+%enddef
+*/
+
 // Now we bind Opencascade types with Java types.
 // /usr/share/swig1.3/java/java.swg contains many simple example to do that.
 /**
