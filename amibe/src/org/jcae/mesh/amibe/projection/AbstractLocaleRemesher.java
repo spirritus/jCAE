@@ -132,6 +132,9 @@ public abstract class AbstractLocaleRemesher {
 			while(current != start)
 			{
 				Vertex next = vertexMap.get(current);
+				assert next != null : "Cannot find next point after " + current
+					+ " in\n" + edges + "\n. Map is\n" + vertexMap +
+					"\n polylines is " + polylines;
 				vertexMap.remove(current);
 				polyline.add(current);
 				current = next;
@@ -166,6 +169,7 @@ public abstract class AbstractLocaleRemesher {
 	private void updateAdjacency(Mesh mesh, Collection<AbstractHalfEdge> edges,
 		Collection<Triangle> newTriangles)
 	{
+		Collection<Triangle> newTrianglesCopy = HashFactory.createSet(newTriangles);
 		edgeMap.clear();
 		for(Triangle t: newTriangles)
 		{
@@ -202,20 +206,23 @@ public abstract class AbstractLocaleRemesher {
 			group = e.getTri().getGroupId();
 			assert edgeMap.contains(e) : e + "\n:sym" + edgeMap.get(e.sym());
 			Triangle newTri = edgeMap.remove(e).getTri();
+			newTrianglesCopy.remove(newTri);
+			//assert newTri.getGroupId() == -1: newTri;
 			newTri.setGroupId(group);
 			assert newTriangles.contains(newTri);
 			updateLink(e.origin(), e.getTri(), newTri);
 			updateLink(e.destination(), e.getTri(), newTri);
 		}
 
-		// only edges created from vertices remain in edgeMap. We set their
-		// group to the group of an input edge
-		for(AbstractHalfEdge e: edgeMap.keySet())
-		{
-			e.getTri().setGroupId(group);
-			Triangle bt = e.createBoundaryTriangle(mesh);
-			if(bt != null)
-				newTriangles.add(bt);
+		// only triangles created from inside vertices remain in newTriangleCopy.
+		// We set their group to the group of an input edge
+		for(Triangle t:newTrianglesCopy) {
+			t.setGroupId(group);
+			for(int i = 0; i < 3; i++) {
+				Vertex v = t.getV(i);
+				if(v.getLink() == null)
+					v.setLink(t);
+			}
 		}
 	}
 

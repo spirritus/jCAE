@@ -26,7 +26,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.Iterator;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.jcae.mesh.amibe.algos3d.TriMultPoly;
@@ -49,155 +49,104 @@ public class EdgeProjectorNG {
 	private final Mesh mesh;
 	private final TriangleKdTree kdTree;
 	private final double tolerance;
-	private final TriangleFinder triangleFinder = new TriangleFinder();
+	private final EdgeTrianglesLocator triangleFinder;
     private final TriMultPoly triMultPoly = new TriMultPoly();
 	private final HoleFiller holeFiller = new HoleFiller();
-
-	private static void compteEdgeAABB(Vertex v1, Vertex v2, double[] aabb)
-	{
-		aabb[0] = Math.min(v1.getX(), v2.getX());
-		aabb[1] = Math.min(v1.getY(), v2.getY());
-		aabb[2] = Math.min(v1.getZ(), v2.getZ());
-		aabb[3] = Math.max(v1.getX(), v2.getX());
-		aabb[4] = Math.max(v1.getY(), v2.getY());
-		aabb[5] = Math.max(v1.getZ(), v2.getZ());
-	}
-
-	private static double normalize(double[] m, int c)
-	{
-		c = c * 4;
-		double norm = Math.sqrt(m[c] * m[c] + m[c+1] * m[c+1] + m[c+2] * m[c+2]);
-		m[c] /= norm;
-		m[c+1] /= norm;
-		m[c+2] /= norm;
-		return norm;
-	}
-
-	/**
-	 * Compute a transformation where the image of v1,v2 is along x.
-	 * @param m a 3x4 matrix, rotation and translation
-	 * see From Efficient Construction of Perpendicular Vectors without Branching
-	 * by Michael M. Stark
-	 */
-	private static double nullSpace(Vertex v1, Vertex v2, double[] m)
-	{
-		// image of X
-		m[0] = v2.getX() - v1.getX();
-		m[1] = v2.getY() - v1.getY();
-		m[2] = v2.getZ() - v1.getZ();
-		double norm = normalize(m, 0);
-		// compute a vector very not collinear to X
-		double x = Math.abs(m[0]);
-		double y = Math.abs(m[1]);
-		double z = Math.abs(m[2]);
-		boolean uyx = (x - y) >= 0;
-		boolean uzx = (x - z) >= 0;
-		boolean uzy = (y - z) >= 0;
-		boolean xm = uyx && uzx;
-		boolean ym = !xm && uzy;
-		boolean zm = !(xm || ym);
-		x = xm ? 1 : 0;
-		y = ym ? 1 : 0;
-		z = zm ? 1 : 0;
-		// image of Y
-		m[4] = m[2] * y - m[1] * z;
-		m[5] = m[0] * z - m[2] * x;
-		m[6] = m[1] * x - m[0] * y;
-		normalize(m, 1);
-		// image of Z
-		m[8] = m[1] * m[6] - m[2] * m[5];
-		m[9] = m[4] * m[2] - m[6] * m[0];
-		m[10] = m[0] * m[5] - m[1] * m[4];
-
-		// translation
-		x = -v1.getX();
-		y = -v1.getY();
-		z = -v1.getZ();
-		m[3] = m[0] * x + m[1] * y + m[2] * z;
-		m[7] = m[4] * x + m[5] * y + m[6] * z;
-		m[11] = m[8] * x + m[9] * y + m[10] * z;
-		return norm;
-	}
-
-	private class TriangleFinder
-	{
-		private final Collection<Triangle> trianglesInAABB = new ArrayList<Triangle>();
-		public final Collection<Triangle> trianglesInOBB = new HashSet<Triangle>();
-		private final double[] aabb = new double[6];
-		private final double[] matrix = new double[12];
-		private final TriangleInterAABB taabb = new TriangleInterAABB();
-		/**
-		 * Find the triangles which must be recreated.
-		 * Fill trianglesInOBB
-		 */
-		public void findTriangles(Vertex v1, Vertex v2, int group)
-		{
-			compteEdgeAABB(v1, v2, aabb);
-			for(int i = 0; i < 3; i++)
-			{
-				aabb[i] -= tolerance;
-				aabb[3+i] += tolerance;
-			}
-			trianglesInAABB.clear();
-			kdTree.getNearTriangles(aabb, trianglesInAABB, group);
-			double norm = nullSpace(v1, v2, matrix);
-			for(int i = 0; i < 3; i++)
-			{
-				aabb[i] = -tolerance;
-				aabb[3+i] = tolerance;
-			}
-			aabb[3] += norm;
-			trianglesInOBB.clear();
-			for(Triangle t: trianglesInAABB)
-			{
-				taabb.setTriangle(t, matrix);
-				if(taabb.triBoxOverlap(aabb, true))
-					trianglesInOBB.add(t);
-			}
-		}
-	}
 
 	public EdgeProjectorNG(Mesh mesh, TriangleKdTree kdTree, double tolerance) {
 		this.mesh = mesh;
 		this.kdTree = kdTree;
 		this.tolerance = tolerance;
+		triangleFinder = new EdgeTrianglesLocator(kdTree) {
+			@Override
+			protected boolean isValidTriangle(Triangle t) {
+				return isProjectionAllowed(t);
+			}
+		};
 	}
 
-	public void project(Vertex v1, Vertex v2, int group)
+	/** Ensure that removing triangles would not remove not removable edges */
+	private boolean checkInternalEdges(Collection<Triangle> triangles) {
+		boolean toReturn = true;
+		Iterator<Triangle> it = triangles.iterator();
+		mainLoop: while(it.hasNext()) {
+			Triangle t = it.next();
+			AbstractHalfEdge e = t.getAbstractHalfEdge();
+			for(int i = 0; i < 3; i++) {
+				boolean isInternalEdge = triangles.contains(e.sym().getTri());
+				if(isInternalEdge && !isEdgeRemovable(e)) {
+					it.remove();
+					toReturn = false;
+					continue mainLoop;
+				}
+				e = e.next();
+			}
+		}
+		return toReturn;
+	}
+
+	public AbstractHalfEdge project(Vertex v1, Vertex v2, int group)
 	{
-		triangleFinder.findTriangles(v1, v2, group);
+		assert v1 != null;
+		assert v2 != null;
+		triangleFinder.locate(v1, v2, group, tolerance);
 		ArrayList<AbstractHalfEdge> border = new ArrayList<AbstractHalfEdge>();
-		for(Triangle t:triangleFinder.trianglesInOBB)
+		for(Triangle t:triangleFinder.getResult())
 		{
 			AbstractHalfEdge e = t.getAbstractHalfEdge();
 			for(int i = 0; i < 3; i++)
 			{
-				if(!triangleFinder.trianglesInOBB.contains(e.sym().getTri()))
+				if(!triangleFinder.getResult().contains(e.sym().getTri()))
 					border.add(e);
 				e = e.next();
 			}
 		}
+		if(!checkInternalEdges(triangleFinder.getResult()))
+			return null;
+		if(border.isEmpty())
+			return null;
 		holeFiller.triangulate(mesh, border,
 			Collections.singleton(Arrays.asList(v1, v2)));
-		for(Triangle t:holeFiller.getNewTriangles())
-			mesh.add(t);
-		for(Triangle t:triangleFinder.trianglesInOBB)
+		for(Triangle t:triangleFinder.getResult())
+		{
 			mesh.remove(t);
+			kdTree.remove(t);
+		}
+		for(Triangle t:holeFiller.getNewTriangles())
+		{
+			mesh.add(t);
+			kdTree.addTriangle(t);
+		}
 		assert mesh.isValid();
+		return holeFiller.getEdge(v1, v2);
+	}
+
+	private boolean checkVertexLinks() {
+		for(Triangle t: mesh.getTriangles())
+		{
+			for(int i = 0; i < 3; i++) {
+				Vertex v = t.getV(i);
+				if(v.getLink() == null && v != mesh.outerVertex) {
+					System.err.println("invalid vertex: "+v);
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	public void projectTriMultPoly(Vertex v1, Vertex v2, int group) throws IOException
 	{
 		//TODO make it work with delauney
 		triMultPoly.setDelauneyTetra(false);
-		triangleFinder.findTriangles(v1, v2, group);
+		triangleFinder.locate(v1, v2, group, tolerance);
 		ArrayList<AbstractHalfEdge> border = new ArrayList<AbstractHalfEdge>();
-		for(Triangle t:triangleFinder.trianglesInOBB)
+		for(Triangle t:triangleFinder.getResult())
 		{
 			AbstractHalfEdge e = t.getAbstractHalfEdge();
 			for(int i = 0; i < 3; i++)
 			{
-				if(!triangleFinder.trianglesInOBB.contains(e.sym().getTri()))
+				if(!triangleFinder.getResult().contains(e.sym().getTri()))
 					border.add(e);
 				e = e.next();
 			}
@@ -215,10 +164,24 @@ public class EdgeProjectorNG {
 		AbstractHalfEdge e = triMultPoly.getEdge(v1, vToAdd[2]);
 		for(Triangle t:triMultPoly.getNewTriangles())
 			mesh.add(t);
-		for(Triangle t:triangleFinder.trianglesInOBB)
+		for(Triangle t:triangleFinder.getResult())
 			mesh.remove(t);
 		assert mesh.isValid();
 		mesh.edgeCollapse(e, v1);
+	}
+
+	/**
+	 * Return true is the projection can be done on this triangle.
+	 * This methods aims at being redefine in subclasses.
+	 * The default implementation return true.
+	 */
+	protected boolean isProjectionAllowed(Triangle triangle)
+	{
+		return true;
+	}
+
+	protected boolean isEdgeRemovable(AbstractHalfEdge edge) {
+		return true;
 	}
 
 	public static void test()

@@ -1,60 +1,28 @@
 
 # jCAE
 from org.jcae.mesh.amibe.ds import Mesh, AbstractHalfEdge
-from org.jcae.mesh.amibe.algos3d import RemeshSkeleton, Remesh, QEMDecimateHalfEdge
+from org.jcae.mesh.amibe.algos3d import Remesh
 from org.jcae.mesh.amibe.algos3d import SwapEdge, ImproveVertexValence, SmoothNodes3DBg
 from org.jcae.mesh.amibe.algos3d import RemoveDegeneratedTriangles
-from org.jcae.mesh.amibe.algos3d import PolylineFactory, RemeshPolyline
 from org.jcae.mesh.amibe.traits import MeshTraitsBuilder
 from org.jcae.mesh.amibe.projection import MeshLiaison
-from org.jcae.mesh.amibe.metrics import EuclidianMetric3D, SingularMetric
 from org.jcae.mesh.xmldata import MeshReader, MeshWriter
 
 # Java
 from java.util import HashMap
-from java.util import ArrayList
-from java.lang import String, Math
+from java.lang import String
 
 # Python
 import sys
-from math import cos, pi
+from math import cos, pi, sqrt
 from optparse import OptionParser
 
 """
-Remesh an existing mesh around singularities
+Refine and clean an existing mesh
 """
 
-cmd=("remeshSingularity", "<inputDir> <outputDir> <pointMetric> <sizeInf>",
-"""Remesh an existing mesh around singularities:
-    1) Decimate (optional)
-    2) Refine according to pointMetric and sizeInf
-    3) Swap edges
-    4) Improve vertex valence
-    5) Smooth mesh (move vertices)
-
-   inputDir
-        input amibe mesh
-
-   outputDir
-        output amibe mesh
-
-   pointMetric
-        A CSV file containing points which to refine around. Each line must
-        contains 8 values: 1, x, y, z, s0 (target size at distance d0), d0, d1
-        (distance from which point has no influence), alpha (singularity order).
-        Target size at distance d of this point is computed like this:
-            a) if d <= d0, s0
-            b) if d >= d1, global mesh size sInf
-            c) if d0 < d < d1, s0 + (sInf - s0) * ((d - d0)/(d1 - d0))^(alpha + 1)
-
-        In addition, the numerical criterion makes sure that the target sizes hi
-        and hj of nodes i and j of each edge e_ij are such that hi < rho * hj
-        with rho > 1 (default 2.0).
-
-    sizeInf
-        Target size sInf""")
-parser = OptionParser(usage="amibebatch %s [OPTIONS] %s\n\n%s" % cmd,
-    prog="remeshSingularity")
+cmd=("refineandclean", "<inputDir> <outputDir>", "Refine and clean an existing mesh")
+parser = OptionParser(usage="amibebatch %s [OPTIONS] %s\n\n%s" % cmd, prog="refineandclean")
 parser.add_option("-a", "--angle", metavar="FLOAT", default=15.0,
                   action="store", type="float", dest="coplanarityAngle",
                   help="angle (in degrees) between face normals to detect "
@@ -62,39 +30,26 @@ parser.add_option("-a", "--angle", metavar="FLOAT", default=15.0,
 parser.add_option("-c", "--coplanarity", metavar="FLOAT",
                   action="store", type="float", dest="coplanarity",
                   help="dot product of face normals to detect feature edges")
-parser.add_option("-D", "--decimate-target", metavar="NUMBER",
-                  action="store", type="int", dest="decimateTarget",
-                  help="decimate mesh before remeshing, keep only NUMBER "
-                  "triangles")
-parser.add_option("-d", "--decimate", metavar="FLOAT",
-                  action="store", type="float", dest="decimateSize",
-                  help="decimate mesh before remeshing, specify tolerance")
+parser.add_option("-t", "--size", metavar="FLOAT", default=None,
+                  action="store", type="float", dest="size",
+                  help="target size")
 parser.add_option("--no-preserveGroups", default=True, action="store_false",
                   dest="preserveGroups",
                   help="do not preserve groups: edges adjacent to two "
                   "different groups are handled like normal edges (default: "
                   "preserve groups)")
-parser.add_option("-k", "--skeleton",
-                  default=False, action="store_true", dest="skeleton",
-                  help="remesh skeleton beforehand")
-parser.add_option("-n", "--allowNearNodes",
-                  action="store_true", dest="allowNearNodes",
-                  help="insert vertices even if this creates a small edge")
-parser.add_option("-r", "--rho", metavar="FLOAT", default=2.0,
-                  action="store", type="float", dest="rho",
-                  help="numerical metric ratio (required: rho > 1, default: 2)")
-parser.add_option("-T", "--nearLengthRatio", metavar="FLOAT",
-                  default=1.0/Math.sqrt(2.0), action="store", type="float",
-                  dest="nearLengthRatio",
-                  help="ratio to size target to determine if a vertex is near "
-                  "an existing point (default: 1/sqrt(2))")
-parser.add_option("-w", "--wire", metavar="FLOAT", default=-1.0,
-                  action="store", type="float", dest="wire",
-                  help="remesh beams (default: -1.0: do not remesh)")
 parser.add_option("-e", "--eratio", metavar="FLOAT", default=10.0,
                   action="store", type="float", dest="eratio",
                   help="remove triangles whose edge ratio is greater than "
                   "tolerance (default: 10.0)")
+parser.add_option("-n", "--allowNearNodes",
+                  action="store_true", dest="allowNearNodes",
+                  help="insert vertices even if this creates a small edge")
+parser.add_option("-T", "--nearLengthRatio", metavar="FLOAT",
+                  default=1.0/sqrt(2.0), action="store", type="float",
+                  dest="nearLengthRatio",
+                  help="ratio to size target to determine if a vertex is near "
+                  "an existing point (default: 1/sqrt(2))")
 parser.add_option("-I", "--immutable-border",
                   action="store_true", dest="immutable_border",
                   help="Tag free edges as immutable")
@@ -109,15 +64,13 @@ parser.add_option("--record", metavar="PREFIX",
 
 (options, args) = parser.parse_args(args=sys.argv[1:])
 
-if len(args) != 4:
+if len(args) != 2:
     parser.print_usage()
     sys.exit(1)
 
 ## Arguments
 xmlDir = args[0]
 outDir = args[1]
-point_metric_file = args[2]
-sizeinf = float(args[3])
 
 ## Process coplanarity option
 coplanarity = cos(options.coplanarityAngle * pi / 180.)
@@ -159,42 +112,18 @@ if options.recordFile:
              String("assert self.m.isValid()") ]
     liaison.getMesh().getTrace().setHooks(cmds)
 
-## Decimate
-if options.decimateSize or options.decimateTarget:
-    decimateOptions = HashMap()
-    if options.decimateSize:
-        decimateOptions.put("size", str(options.decimateSize))
-    elif options.decimateTarget:
-        decimateOptions.put("maxtriangles", str(options.decimateTarget))
-    decimateOptions.put("coplanarity", str(coplanarity))
-    QEMDecimateHalfEdge(liaison, decimateOptions).compute()
-    swapOptions = HashMap()
-    swapOptions.put("coplanarity", str(coplanarity))
-    SwapEdge(liaison, swapOptions).compute()
+## Refine
+if options.size is not None:
+    RefineOpts = HashMap()
+    RefineOpts.put("size", str(options.size))
+    RefineOpts.put("coplanarity", str(coplanarity))
+    if options.allowNearNodes:
+        RefineOpts.put("allowNearNodes", "true")
+    RefineOpts.put("nearLengthRatio", str(options.nearLengthRatio))
+Remesh(liaison, RefineOpts).compute()
 
-## Metric
-if options.rho > 1.0:
-    ## mixed metric
-    metric = SingularMetric(sizeinf, point_metric_file, options.rho, True)
-else:
-    ## analytic metric
-    metric = SingularMetric(sizeinf, point_metric_file)
-
-## Remesh Skeleton
-if options.skeleton:
-    RemeshSkeleton(liaison, 1.66, sizeinf/100.0, metric).compute()
-
-## Remesh
-refineOptions = HashMap()
-refineOptions.put("size", str(sizeinf))
-refineOptions.put("coplanarity", str(coplanarity))
-refineOptions.put("nearLengthRatio", str(options.nearLengthRatio))
-refineOptions.put("project", "false")
-if options.allowNearNodes:
-    refineOptions.put("allowNearNodes", "true")
-refineAlgo = Remesh(liaison, refineOptions)
-refineAlgo.setAnalyticMetric(metric)
-refineAlgo.compute();
+if options.recordFile:
+    liaison.getMesh().getTrace().finish()
 
 ## Swap
 swapOptions = HashMap()
@@ -225,23 +154,6 @@ SmoothNodes3DBg(liaison, smoothOptions).compute()
 rdOptions = HashMap()
 rdOptions.put("rho", str(options.eratio))
 RemoveDegeneratedTriangles(liaison, rdOptions).compute()
-
-## Remesh beams
-if options.wire > 0.0:
-    polylines = PolylineFactory(liaison.mesh, 135.0, options.wire*0.2)
-    liaison.mesh.resetBeams()
-    for entry in polylines.entrySet():
-        groupId = entry.key
-        for polyline in entry.value:
-            listM = ArrayList()
-            for v in polyline:
-                listM.add(EuclidianMetric3D(options.wire))
-            if liaison.mesh.getGroupName(groupId) in immutable_groups:
-                result = polyline
-            else:
-                result = RemeshPolyline(liaison.mesh, polyline, listM).compute()
-            for i in xrange(result.size() - 1):
-                liaison.mesh.addBeam(result.get(i), result.get(i+1), groupId)
 
 ## Output
 MeshWriter.writeObject3D(liaison.getMesh(), outDir, "")

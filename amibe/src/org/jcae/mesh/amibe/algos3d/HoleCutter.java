@@ -23,6 +23,7 @@ package org.jcae.mesh.amibe.algos3d;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
@@ -39,7 +40,7 @@ import org.jcae.mesh.amibe.util.HashFactory;
  * @author Jerome Robert
  */
 public class HoleCutter {
-	private boolean isClosedLoop(Set<AbstractHalfEdge> edges)
+	private boolean isClosedLoop(Collection<AbstractHalfEdge> edges)
 	{
 		Map<Vertex, Vertex> map = HashFactory.createMap(edges.size());
 		Vertex start = null;
@@ -65,14 +66,32 @@ public class HoleCutter {
 				return false;
 		}
 	}
+
 	/**
-	 * return the list of triangles in the hole
+	 * Compute the vector normal to an half edge on its triangle
+	 * @param result the normalized result vector
 	 */
-	public Collection<Triangle> cut(Set<AbstractHalfEdge> edges)
+	private void edgeNormal(AbstractHalfEdge edge, double[] result, double[] tmp1, double[] tmp2)
 	{
-		Set<Triangle> toReturn = HashFactory.createSet();
-		if(!isClosedLoop(edges))
-			return toReturn;
+		for(int i = 0; i < 3; i++)
+		{
+			tmp1[i] = edge.destination().get(i) -
+				edge.origin().get(i); //OD
+			tmp2[i] = edge.apex().get(i) -
+				edge.origin().get(i); //OA
+		}
+		double alpha = Matrix3D.prodSca(tmp1, tmp2) /
+			Matrix3D.prodSca(tmp1, tmp1);
+
+		for(int i = 0; i < 3; i++)
+			result[i] = tmp2[i] - alpha * tmp1[i];
+
+		double norm = Matrix3D.norm(result);
+		for(int i = 0; i < 3; i++)
+			result[i] /= norm;
+	}
+
+	private Set<AbstractHalfEdge> findLoopFan(Collection<AbstractHalfEdge> edges) {
 		Set<AbstractHalfEdge> loop = HashFactory.createSet(edges.size());
 		double[] tmp1 = new double[3];
 		double[] tmp2 = new double[3];
@@ -80,35 +99,28 @@ public class HoleCutter {
 		double[] triDir = new double[3];
 		for(AbstractHalfEdge edge: edges)
 		{
-			edge = getCutter(edge);
-			Matrix3D.computeNormal3D(edge.origin(), edge.destination(), edge.apex(), tmp1, tmp2, normal);
-			Iterator<AbstractHalfEdge> it = edge.fanIterator();
+			AbstractHalfEdge cEdge = getCutter(edge);
+			if(isNormalCut(edge))
+			{
+				// compute the opposite of the triangle normal because in
+				// normalCut mode, the normal target the out side of the loop
+				Matrix3D.computeNormal3D(cEdge.origin(), cEdge.apex(), cEdge.destination(), tmp1, tmp2, normal);
+			}
+			else
+				edgeNormal(cEdge, normal, tmp1, tmp2);
+			Iterator<AbstractHalfEdge> it = cEdge.fanIterator();
 			AbstractHalfEdge bestEdge = null;
-			double bestDot = Double.MAX_VALUE;
+			double bestDot = Double.NEGATIVE_INFINITY;
 			while(it.hasNext())
 			{
 				AbstractHalfEdge otherEdge = it.next();
 				// select the fan which is inside the loop
-				if(otherEdge != edge && isCutted(otherEdge))
+				if(otherEdge != cEdge && isCutted(otherEdge))
 				{
-					for(int i = 0; i < 3; i++)
-					{
-						tmp1[i] = otherEdge.destination().get(i) -
-							otherEdge.origin().get(i); //OD
-						tmp2[i] = otherEdge.apex().get(i) -
-							otherEdge.origin().get(i); //OA
-					}
-					double alpha = Matrix3D.prodSca(tmp1, tmp2) /
-						Matrix3D.prodSca(tmp1, tmp1);
-
-					for(int i = 0; i < 3; i++)
-						triDir[i] = tmp2[i] - alpha * tmp1[i];
-
-					double norm = Matrix3D.norm(triDir);
-					for(int i = 0; i < 3; i++)
-						triDir[i] /= norm;
+					edgeNormal(otherEdge, triDir, tmp1, tmp2);
 					double dot = Matrix3D.prodSca(triDir, normal);
-					if(dot < bestDot)
+					// keep the most parallel vector
+					if(dot > bestDot)
 					{
 						bestDot = dot;
 						bestEdge = otherEdge;
@@ -119,6 +131,30 @@ public class HoleCutter {
 			{
 				loop.add(bestEdge);
 			}
+		}
+		return loop;
+	}
+
+	public Collection<Triangle> cut(Collection<AbstractHalfEdge> edges) {
+		return cut(edges, true);
+	}
+
+	/**
+	 * return the list of triangles in the hole
+	 */
+	public Collection<Triangle> cut(Collection<AbstractHalfEdge> edges, boolean searchLoopFan)
+	{
+		Set<Triangle> toReturn = HashFactory.createSet();
+		if(!isClosedLoop(edges))
+			return toReturn;
+
+		Set<AbstractHalfEdge> loop;
+		if(searchLoopFan) {
+			loop = findLoopFan(edges);
+		} else if(edges instanceof Set) {
+			loop = (Set<AbstractHalfEdge>) edges;
+		} else {
+			loop = new HashSet<AbstractHalfEdge>(edges);
 		}
 		if(!loop.isEmpty())
 			cutHole(toReturn, loop);
@@ -150,6 +186,14 @@ public class HoleCutter {
 		return true;
 	}
 
+	/**
+	 * return true if the cutting triangle is expected to be perpendicular
+	 * to the cutted surface, false if the cutting triangle is expected to be
+	 * parallel to the cutted surface.
+	 */
+	protected boolean isNormalCut(AbstractHalfEdge edge) {
+		return true;
+	}
 	/**
 	 * tag the triangle which are inside the hole
 	 * @param triangle the list of tagged triangles
